@@ -316,7 +316,31 @@ install_python_dependencies() {
   log "安装 Python 依赖..."
   "$PYTHON_CMD" -m venv "$VENV_DIR"
   "$VENV_DIR/bin/python" -m pip install --upgrade pip
-  "$VENV_DIR/bin/pip" install -r requirements.txt
+
+  local req_file="$PROJECT_DIR/requirements.txt"
+  local pip_cmd="$VENV_DIR/bin/pip"
+
+  if "$pip_cmd" install -r "$req_file"; then
+    return
+  fi
+
+  warn "默认 pip 源安装失败，开始尝试备用镜像..."
+
+  local mirror
+  local mirrors=(
+    "https://pypi.tuna.tsinghua.edu.cn/simple"
+    "https://mirrors.cloud.tencent.com/pypi/simple"
+    "https://pypi.org/simple"
+  )
+
+  for mirror in "${mirrors[@]}"; do
+    log "尝试 pip 源: ${mirror}"
+    if "$pip_cmd" install --index-url "$mirror" -r "$req_file"; then
+      return
+    fi
+  done
+
+  fail "Python 依赖安装失败。可手动指定源后重试：PIP_INDEX_URL=https://pypi.org/simple ./deploy/start.sh"
 }
 
 install_frontend_dependencies() {
