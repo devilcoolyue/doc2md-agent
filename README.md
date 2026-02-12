@@ -26,6 +26,8 @@ doc-agent/
 ├── deploy/
 │   ├── doc2md.service        # systemd 单元
 │   └── start.sh              # 一键部署/启动脚本
+├── scripts/
+│   └── install.sh            # 新服务器一行安装脚本（curl | bash）
 ├── main.py                   # CLI 兼容入口（转发到 backend.cli）
 ├── server.py                 # Web 兼容入口（转发到 backend.server）
 ├── config.example.yaml
@@ -63,7 +65,7 @@ python main.py providers
 ```bash
 pip install -r requirements.txt
 python server.py
-# 默认监听 http://localhost:8080
+# 默认监听 http://localhost:9999
 ```
 
 ### 前端开发
@@ -72,10 +74,10 @@ python server.py
 cd frontend
 npm install
 npm run dev
-# 访问 http://localhost:5173
+# 访问 http://localhost:10086
 ```
 
-Vite 已配置代理：`/api -> http://localhost:8080`。
+Vite 已配置代理：`/api -> http://localhost:9999`。
 
 ### 前端生产构建
 
@@ -103,10 +105,28 @@ python server.py
 
 ## 部署（systemd）
 
+### 新服务器一行安装并启动
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devilcoolyue/doc2md-agent/main/scripts/install.sh | bash
+```
+
+说明：
+
+1. 脚本会拉取 `devilcoolyue/doc2md-agent` 最新代码
+2. 然后调用项目内 `deploy/start.sh` 做环境检查、依赖安装、DeepSeek API Key 填写和前后端启动
+3. 默认安装目录是 `$HOME/doc2md-agent`
+
+可选：自定义安装目录
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devilcoolyue/doc2md-agent/main/scripts/install.sh | INSTALL_DIR=/opt/doc2md-agent bash
+```
+
 `deploy/doc2md.service` 示例：
 
 ```ini
-ExecStart=/opt/doc2md/venv/bin/uvicorn backend.server:app --host 0.0.0.0 --port 8080
+ExecStart=/opt/doc2md/venv/bin/uvicorn backend.server:app --host 0.0.0.0 --port 9999
 ```
 
 快速启动脚本：
@@ -114,6 +134,14 @@ ExecStart=/opt/doc2md/venv/bin/uvicorn backend.server:app --host 0.0.0.0 --port 
 ```bash
 ./deploy/start.sh
 ```
+
+`deploy/start.sh` 会执行以下动作：
+
+1. 先执行 `git pull`（若工作区无未提交改动）
+2. 自动检测 Linux 发行版并安装缺失的 `pandoc`
+3. 检查 Python/Node 环境并安装依赖
+4. 提示输入默认大模型配置（`deepseek`，固定 `base_url=https://api.deepseek.com/v1`，只需粘贴 API Key）
+5. 一键启动后端 `9999` 与前端 `10086`
 
 ## 自定义 Prompt
 

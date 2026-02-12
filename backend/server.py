@@ -383,4 +383,4 @@ if (FRONTEND_DIST / "index.html").exists():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("backend.server:app", host="0.0.0.0", port=8080, reload=False)
+    uvicorn.run("backend.server:app", host="0.0.0.0", port=9999, reload=False)
