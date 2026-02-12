@@ -1,0 +1,65 @@
+# Doc2MD Agent - 文档智能转换智能体
+# AI Provider 配置文件
+
+# 复制此文件为 config.yaml 并填入你的 API Key
+# cp config.example.yaml config.yaml
+
+# 当前使用的 AI 提供商 (openai / anthropic / deepseek / zhipu / qwen / ollama / custom)
+provider: "deepseek"
+
+# 各提供商配置
+providers:
+  openai:
+    api_key: "sk-xxx"
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o"
+    max_tokens: 16000
+
+  anthropic:
+    api_key: "sk-ant-xxx"
+    base_url: "https://api.anthropic.com"
+    model: "claude-sonnet-4-20250514"
+    max_tokens: 16000
+
+  deepseek:
+    api_key: "sk-xxx"
+    base_url: "https://api.deepseek.com/v1"
+    model: "deepseek-reasoner"
+    max_tokens: 16000
+
+  zhipu:  # 智谱AI
+    api_key: "xxx"
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    model: "glm-4-plus"
+    max_tokens: 16000
+
+  qwen:  # 通义千问
+    api_key: "sk-xxx"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model: "qwen-max"
+    max_tokens: 16000
+
+  ollama:  # 本地部署
+    api_key: "ollama"
+    base_url: "http://localhost:11434/v1"
+    model: "qwen2.5:32b"
+    max_tokens: 16000
+
+  custom:  # 自定义 OpenAI 兼容接口
+    api_key: "xxx"
+    base_url: "http://your-server:8080/v1"
+    model: "your-model"
+    max_tokens: 16000
+
+# 转换设置
+conversion:
+  # 单次发送给 AI 的最大字符数（超过则分片处理）
+  chunk_size: 8000
+  # 输出语言 (zh / en / auto)
+  language: "auto"
+  # 是否生成目录
+  generate_toc: true
+  # JSON 代码块高亮
+  highlight_json: true
+  # 图片输出文件夹名
+  image_dir: "images"

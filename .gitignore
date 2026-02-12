@@ -1,0 +1,25 @@
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local secrets and runtime config
+config.yaml
+.env
+.env.*
+
+# Build artifacts and generated output
+output/
+frontend/node_modules/
+frontend/dist/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Logs and temp
+*.log
+tmp/
+.cache/
