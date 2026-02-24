@@ -37,6 +37,7 @@ class LLMProvider:
         self.base_url = provider_conf.get("base_url", "")
         self.model = provider_conf.get("model", "")
         self.max_tokens = provider_conf.get("max_tokens", 16000)
+        self.temperature = provider_conf.get("temperature", 0)
         self.call_count = 0
 
         # Token 用量统计
@@ -97,11 +98,12 @@ class LLMProvider:
             )
             self._call = self._call_openai
 
-    def _call_openai(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int]:
+    def _call_openai(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, str]:
         """调用 OpenAI 兼容接口"""
         response = self.client.chat.completions.create(
             model=self.model,
             max_tokens=self.max_tokens,
+            temperature=self.temperature,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -110,13 +112,15 @@ class LLMProvider:
         prompt_tokens = response.usage.prompt_tokens if response.usage else 0
         completion_tokens = response.usage.completion_tokens if response.usage else 0
         content = response.choices[0].message.content or ""
-        return content, prompt_tokens, completion_tokens
+        finish_reason = response.choices[0].finish_reason or "unknown"
+        return content, prompt_tokens, completion_tokens, finish_reason
 
-    def _call_anthropic_native(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int]:
+    def _call_anthropic_native(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, str]:
         """调用 Anthropic 原生接口"""
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
+            temperature=self.temperature,
             system=system_prompt,
             messages=[
                 {"role": "user", "content": user_prompt},
@@ -125,7 +129,8 @@ class LLMProvider:
         prompt_tokens = response.usage.input_tokens if response.usage else 0
         completion_tokens = response.usage.output_tokens if response.usage else 0
         content = response.content[0].text if response.content else ""
-        return content, prompt_tokens, completion_tokens
+        finish_reason = response.stop_reason or "unknown"
+        return content, prompt_tokens, completion_tokens, finish_reason
 
     def _emit_event(self, payload: dict[str, Any]) -> None:
         if self.event_callback:
@@ -189,17 +194,17 @@ class LLMProvider:
             "llm_calls": self.total_usage["calls"],
         }
 
-    def chat(
+    def chat_with_meta(
         self,
         system_prompt: str,
         user_prompt: str,
         context: Optional[dict[str, Any]] = None,
-    ) -> str:
+    ) -> dict[str, Any]:
         """
         统一调用入口
         :param system_prompt: 系统提示词
         :param user_prompt: 用户输入
-        :return: AI 回复文本
+        :return: 带元信息的 AI 回复
         """
         context = context or {}
         self.call_count += 1
@@ -221,6 +226,7 @@ class LLMProvider:
                 "system_chars": len(system_prompt),
                 "user_chars": len(user_prompt),
                 "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
                 "message": (
                     f"LLM 调用 #{call_id} 开始：{self.provider_name}/{self.model}，"
                     f"操作={operation_desc}，输入字符(system={len(system_prompt)}, user={len(user_prompt)})"
@@ -230,7 +236,7 @@ class LLMProvider:
 
         start_time = time.perf_counter()
         try:
-            result, prompt_tokens, completion_tokens = self._call(system_prompt, user_prompt)
+            result, prompt_tokens, completion_tokens, finish_reason = self._call(system_prompt, user_prompt)
         except Exception as exc:
             elapsed = time.perf_counter() - start_time
             self._emit_event(
@@ -250,6 +256,7 @@ class LLMProvider:
 
         elapsed = time.perf_counter() - start_time
         call_cost = self._accumulate_usage(prompt_tokens, completion_tokens)
+        truncated = finish_reason in {"length", "max_tokens"}
 
         logger.debug(f"输出长度: {len(result)}")
         self._emit_event(
@@ -265,15 +272,33 @@ class LLMProvider:
                 "elapsed_seconds": round(elapsed, 3),
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
+                "finish_reason": finish_reason,
+                "truncated": truncated,
                 "input_cost": call_cost["input_cost"],
                 "output_cost": call_cost["output_cost"],
                 "total_cost": call_cost["total_cost"],
                 "currency": self._currency,
                 "message": (
                     f"LLM 调用 #{call_id} 完成：耗时 {elapsed:.2f}s，"
-                    f"tokens(输入={prompt_tokens}, 输出={completion_tokens})，"
+                    f"tokens(输入={prompt_tokens}, 输出={completion_tokens}, finish={finish_reason})，"
                     f"费用 {self._currency}{call_cost['total_cost']:.6f}"
                 ),
             }
         )
-        return result
+        return {
+            "content": result,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "finish_reason": finish_reason,
+            "truncated": truncated,
+            "call_id": call_id,
+        }
+
+    def chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        context: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """兼容旧调用：仅返回文本内容"""
+        return self.chat_with_meta(system_prompt, user_prompt, context=context)["content"]

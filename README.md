@@ -38,9 +38,9 @@ doc-agent/
 ## 工作流
 
 1. `pandoc` 提取 doc/docx 内容和图片
-2. AI 分析文档结构
-3. AI 分片转换为 Markdown
-4. 后处理（目录、图片路径、清理）并输出压缩包
+2. 规则优先分析文档结构（目录/编号层级），必要时再回退 AI
+3. 按章节优先分片，AI 严格保真转换（支持分片校验与重试）
+4. 后处理（目录、图片路径、清理、严格校验）并输出压缩包
 
 ## 环境准备
 
@@ -102,6 +102,13 @@ python server.py
 
 1. 复制模板：`config.example.yaml -> config.yaml`
 2. 设置 API Key（推荐使用环境变量 `DOC2MD_API_KEY`）
+
+关键转换配置（`conversion`）：
+
+- `chunk_strategy`: `section`（推荐，按章节优先）或 `size`
+- `strict_mode`: 开启后会校验“标题不增不减”“错误码不扩写”
+- `max_chunk_retries`: 单个分片校验失败时自动重试次数
+- `deterministic_toc`: 开启后使用非 AI 目录生成，结构更稳定
 
 ## 部署（systemd）
 

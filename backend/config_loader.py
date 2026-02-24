@@ -37,11 +37,16 @@ def load_config(config_path: str = None, provider_override: str = None) -> dict:
                     "base_url": "https://api.deepseek.com/v1",
                     "model": "deepseek-chat",
                     "max_tokens": 16000,
+                    "temperature": 0,
                 }
             },
             "conversion": {
                 "chunk_size": 8000,
+                "chunk_strategy": "section",
                 "generate_toc": True,
+                "deterministic_toc": True,
+                "strict_mode": True,
+                "max_chunk_retries": 2,
                 "image_dir": "images",
             },
         }
