@@ -1,6 +1,7 @@
 import pytest
 
 from backend.agent import Doc2MDAgent
+from backend.preprocessor import fix_pandoc_table_codeblocks
 
 
 def make_agent() -> Doc2MDAgent:
@@ -105,3 +106,52 @@ def test_validate_final_output_detects_missing_heading():
             final_md=final_md,
             expected_headings=["1 引言", "2 接口设计"],
         )
+
+
+def test_json_masked_value_can_be_normalized():
+    agent = make_agent()
+    block = """
+{
+  "userId": 1118xxxx5311,
+  "name": "demo"
+}
+""".strip()
+    normalized, ok = agent._normalize_json_block(block)
+    assert ok
+    assert '"userId": "1118xxxx5311"' in normalized
+
+
+def test_replace_output_json_blocks_with_source():
+    agent = make_agent()
+    source_chunk = """
+```json
+{
+  "code": "0",
+  "msg": "success"
+}
+```
+""".strip()
+    converted_chunk = """
+```json
+{
+  "code": "200",
+  "msg": "placeholder"
+}
+```
+""".strip()
+    replaced = agent._replace_output_json_blocks_with_source(source_chunk, converted_chunk)
+    assert '"code": "0"' in replaced
+    assert "placeholder" not in replaced
+
+
+def test_fix_pandoc_table_codeblocks_supports_colon_border():
+    text = """
++:-------------------+
+| {                 |
+| \\"code\\": \\"0\\" |
+| }                 |
++--------------------+
+""".strip()
+    fixed = fix_pandoc_table_codeblocks(text)
+    assert "```json" in fixed
+    assert '"code": "0"' in fixed

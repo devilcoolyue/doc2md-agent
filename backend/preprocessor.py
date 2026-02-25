@@ -172,12 +172,15 @@ def fix_pandoc_table_codeblocks(text: str) -> str:
     result = []
     i = 0
 
+    # 单列表格边框：允许 pandoc 对齐语法中的冒号（如 +:-----+）
+    single_col_border = re.compile(r'^\+[=:\-]+\+$')
+
     while i < len(lines):
         line = lines[i]
 
         # 只匹配单列表格边框：仅首尾两个 +，中间全是 - 或 =
         # 多列表格如 +---+---+---+ 中间有额外的 +，不匹配
-        if re.match(r'^\+[-=]+\+$', line.strip()):
+        if single_col_border.match(line.strip()):
             # 记住起始位置，解析失败时可以回退
             start_i = i
             table_content_lines = []
@@ -185,7 +188,7 @@ def fix_pandoc_table_codeblocks(text: str) -> str:
             while i < len(lines):
                 row = lines[i]
                 # 同样只匹配单列结束边框
-                if re.match(r'^\+[-=]+\+$', row.strip()):
+                if single_col_border.match(row.strip()):
                     i += 1
                     break  # 表格结束
                 # 提取 | ... | 中的内容
@@ -205,6 +208,7 @@ def fix_pandoc_table_codeblocks(text: str) -> str:
                 # 去掉 pandoc 表格中的多余空行
                 table_content_lines = [l for l in table_content_lines if l.strip() != '']
                 content = "\n".join(table_content_lines)
+                content = content.replace("\u00a0", " ")
                 # 去掉转义的引号
                 content = content.replace('\\"', '"')
                 content = content.replace('\\[', '[')

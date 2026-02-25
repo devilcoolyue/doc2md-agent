@@ -471,6 +471,89 @@ class Doc2MDAgent:
         codes = set(re.findall(r'^\s*\|?\s*(\d{4,6})\s*(?:\||\s{2,})', text, flags=re.MULTILINE))
         return {code for code in codes if code.isdigit()}
 
+    def _extract_json_blocks(self, text: str) -> list[str]:
+        """提取 ```json fenced code block 内容。"""
+        pattern = re.compile(r'```json\s*\n(.*?)\n```', re.S)
+        return [m.group(1).strip() for m in pattern.finditer(text)]
+
+    def _sanitize_json_like_text(self, text: str) -> str:
+        """
+        对 JSON-like 文本做轻量修复后用于解析：
+        - 处理 NBSP/转义符
+        - 去掉尾随逗号
+        - 将带字母的裸值（如 1118xxxx5311）转为字符串
+        """
+        s = text.replace("\u00a0", " ").strip()
+        s = s.replace('\\"', '"')
+        s = s.replace('\\[', '[')
+        s = s.replace('\\]', ']')
+        s = re.sub(r',\s*([}\]])', r'\1', s)
+
+        def quote_masked_literals(m):
+            prefix, value, suffix = m.group(1), m.group(2), m.group(3)
+            lower = value.lower()
+            if lower in {"true", "false", "null"}:
+                return m.group(0)
+            if re.fullmatch(r'-?\d+(?:\.\d+)?', value):
+                return m.group(0)
+            return f'{prefix}"{value}"{suffix}'
+
+        s = re.sub(
+            r'(:\s*)([A-Za-z0-9_./:+-]*[A-Za-z][A-Za-z0-9_./:+-]*)(\s*[,}\]])',
+            quote_masked_literals,
+            s,
+        )
+        return s
+
+    def _normalize_json_block(self, block_text: str) -> tuple[str, bool]:
+        """返回 (规范化后的 JSON 字符串, 是否可解析)。"""
+        candidate = self._sanitize_json_like_text(block_text)
+        try:
+            parsed = json.loads(candidate)
+            return json.dumps(parsed, ensure_ascii=False, indent=2), True
+        except Exception:
+            return block_text.strip(), False
+
+    def _replace_output_json_blocks_with_source(self, source_chunk: str, converted_chunk: str) -> str:
+        """
+        若源分片存在 JSON 代码块，则优先回填源 JSON（规范化后）到输出中，
+        避免模型改写/补写返回体示例。
+        """
+        source_blocks = self._extract_json_blocks(source_chunk)
+        if not source_blocks:
+            return converted_chunk
+
+        normalized_sources = []
+        for block in source_blocks:
+            normalized, ok = self._normalize_json_block(block)
+            normalized_sources.append(normalized if ok else block.strip())
+
+        pattern = re.compile(r'```json\s*\n(.*?)\n```', re.S)
+        matches = list(pattern.finditer(converted_chunk))
+        if not matches:
+            appended = "\n\n".join([f"```json\n{blk}\n```" for blk in normalized_sources])
+            if not converted_chunk.strip():
+                return appended
+            return converted_chunk.rstrip() + "\n\n" + appended
+
+        replace_count = min(len(matches), len(normalized_sources))
+        parts = []
+        last_end = 0
+        for idx, match in enumerate(matches):
+            parts.append(converted_chunk[last_end:match.start()])
+            if idx < replace_count:
+                parts.append(f"```json\n{normalized_sources[idx]}\n```")
+            else:
+                parts.append(match.group(0))
+            last_end = match.end()
+        parts.append(converted_chunk[last_end:])
+        if len(matches) < len(normalized_sources):
+            missing = "\n\n".join(
+                [f"```json\n{blk}\n```" for blk in normalized_sources[len(matches):]]
+            )
+            parts.append("\n\n" + missing)
+        return "".join(parts)
+
     def _remove_fenced_code_blocks(self, text: str) -> str:
         """移除 fenced code block，避免把代码内的 # 误判为标题。"""
         cleaned = []
@@ -521,6 +604,18 @@ class Doc2MDAgent:
         if not continuation_mode and allowed_norm and not output_numbered_norm:
             return False, "缺少必须的编号标题"
 
+        source_json_blocks = self._extract_json_blocks(source_chunk)
+        output_json_blocks = self._extract_json_blocks(output)
+        if source_json_blocks:
+            if len(output_json_blocks) != len(source_json_blocks):
+                return False, (
+                    f"JSON 代码块数量不一致（source={len(source_json_blocks)}, output={len(output_json_blocks)}）"
+                )
+        for idx, block in enumerate(output_json_blocks, start=1):
+            _, ok = self._normalize_json_block(block)
+            if not ok:
+                return False, f"第 {idx} 个 JSON 代码块不是合法 JSON"
+
         # “错误码”片段增加子集校验，防止 100000+ 幻觉扩写
         if "错误码" in source_chunk:
             source_codes = self._extract_error_codes(source_chunk)
@@ -565,6 +660,7 @@ class Doc2MDAgent:
             if re.match(r'^\s*```markdown\s*\n', converted):
                 converted = re.sub(r'^\s*```markdown\s*\n', '', converted)
                 converted = re.sub(r'\n```\s*$', '', converted)
+            converted = self._replace_output_json_blocks_with_source(chunk, converted)
             valid, reason = self._validate_chunk_output(
                 source_chunk=chunk,
                 converted_chunk=converted,
@@ -742,6 +838,17 @@ class Doc2MDAgent:
             if raw_codes and final_codes and not final_codes.issubset(raw_codes):
                 extras = sorted(final_codes - raw_codes)[:self.max_validation_report_items]
                 issues.append(f"错误码章节第 {idx + 1} 节存在原文未出现编码: {extras}")
+
+        # 4) JSON 代码块必须可解析（允许掩码字段做轻量修复后解析）
+        invalid_json_indices = []
+        for idx, block in enumerate(self._extract_json_blocks(final_md), start=1):
+            _, ok = self._normalize_json_block(block)
+            if not ok:
+                invalid_json_indices.append(idx)
+        if invalid_json_indices:
+            issues.append(
+                f"JSON 代码块格式错误: {invalid_json_indices[:self.max_validation_report_items]}"
+            )
 
         if issues:
             raise RuntimeError("最终输出校验失败: " + "；".join(issues))
