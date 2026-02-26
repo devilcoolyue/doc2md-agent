@@ -143,7 +143,10 @@ class LLMProvider:
         if operation == "convert_chunk":
             chunk_index = context.get("chunk_index")
             total_chunks = context.get("total_chunks")
+            section_label = context.get("section_label") or context.get("section_heading") or context.get("section_id")
             if chunk_index and total_chunks:
+                if section_label:
+                    return f"分片转换 {chunk_index}/{total_chunks} · {section_label}"
                 return f"分片转换 {chunk_index}/{total_chunks}"
             return "分片转换"
         if operation == "generate_toc":
@@ -223,6 +226,9 @@ class LLMProvider:
                 "operation_desc": operation_desc,
                 "chunk_index": context.get("chunk_index"),
                 "total_chunks": context.get("total_chunks"),
+                "section_id": context.get("section_id"),
+                "section_heading": context.get("section_heading"),
+                "section_label": context.get("section_label"),
                 "system_chars": len(system_prompt),
                 "user_chars": len(user_prompt),
                 "max_tokens": self.max_tokens,
@@ -247,6 +253,11 @@ class LLMProvider:
                     "model": self.model,
                     "operation": context.get("operation", "generic"),
                     "operation_desc": operation_desc,
+                    "chunk_index": context.get("chunk_index"),
+                    "total_chunks": context.get("total_chunks"),
+                    "section_id": context.get("section_id"),
+                    "section_heading": context.get("section_heading"),
+                    "section_label": context.get("section_label"),
                     "elapsed_seconds": round(elapsed, 3),
                     "error": str(exc),
                     "message": f"LLM 调用 #{call_id} 失败：{exc}",
@@ -269,6 +280,9 @@ class LLMProvider:
                 "operation_desc": operation_desc,
                 "chunk_index": context.get("chunk_index"),
                 "total_chunks": context.get("total_chunks"),
+                "section_id": context.get("section_id"),
+                "section_heading": context.get("section_heading"),
+                "section_label": context.get("section_label"),
                 "elapsed_seconds": round(elapsed, 3),
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,

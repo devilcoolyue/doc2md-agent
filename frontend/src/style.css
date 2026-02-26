@@ -131,6 +131,12 @@ select {
   box-shadow: 0 8px 24px rgba(213, 107, 46, 0.25);
 }
 
+.btn-danger {
+  color: #fff;
+  background: linear-gradient(120deg, #c2412d, #e3573f);
+  box-shadow: 0 8px 24px rgba(194, 65, 45, 0.25);
+}
+
 .btn-ghost {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.7);
@@ -217,17 +223,18 @@ select {
   right: 18px;
   bottom: 18px;
   z-index: 35;
-  border: none;
+  border: 1px solid #2f3a4d;
   border-radius: 999px;
   padding: 10px 14px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   font-weight: 700;
-  color: #fff;
-  background: linear-gradient(120deg, #2c748f, #1f8a72);
-  box-shadow: 0 10px 28px rgba(22, 72, 91, 0.26);
+  color: #d7f7df;
+  background: linear-gradient(120deg, #121923, #0d1117);
+  box-shadow: 0 14px 30px rgba(4, 8, 16, 0.46);
   cursor: pointer;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 .log-toggle-count {
@@ -236,7 +243,9 @@ select {
   padding: 3px 8px;
   font-size: 0.78rem;
   text-align: center;
-  background: rgba(255, 255, 255, 0.22);
+  color: #9df09f;
+  background: rgba(57, 147, 85, 0.22);
+  border: 1px solid rgba(94, 201, 122, 0.42);
 }
 
 .log-drawer {
@@ -244,17 +253,29 @@ select {
   top: 14px;
   right: 14px;
   z-index: 30;
-  width: min(440px, calc(100vw - 22px));
+  width: min(50vw, calc(100vw - 22px));
+  min-width: min(460px, calc(100vw - 22px));
   height: calc(100vh - 28px);
   border-radius: 16px;
-  border: 1px solid var(--line);
-  background: rgba(248, 252, 253, 0.94);
-  box-shadow: 0 22px 56px rgba(20, 55, 70, 0.2);
-  backdrop-filter: blur(10px);
+  border: 1px solid #2a3646;
+  background: radial-gradient(circle at top right, #172130 0%, #0a0f15 58%, #070b10 100%);
+  box-shadow: 0 26px 58px rgba(3, 6, 14, 0.62);
   display: flex;
   flex-direction: column;
   transform: translateX(calc(100% + 24px));
   transition: transform 0.24s ease;
+  overflow: hidden;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+.log-drawer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(120, 164, 206, 0.05) 1px, transparent 1px);
+  background-size: 100% 22px;
+  opacity: 0.35;
 }
 
 .log-drawer.open {
@@ -262,44 +283,139 @@ select {
 }
 
 .log-drawer-header {
+  position: relative;
+  z-index: 1;
   padding: 14px 14px 10px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid #263243;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 10px;
+  background: rgba(10, 14, 21, 0.78);
 }
 
 .log-drawer-title {
   margin: 0;
   font-size: 1.05rem;
+  color: #e7edf6;
+  letter-spacing: 0.2px;
+}
+
+.log-status {
+  color: #8ea3ba;
+}
+
+.log-close-btn {
+  border: 1px solid #3a4a60;
+  background: rgba(18, 27, 40, 0.9);
+  color: #d4e3f5;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.82rem;
+}
+
+.log-close-btn:hover {
+  border-color: #5d7190;
+  color: #f0f6ff;
+  background: rgba(25, 36, 52, 0.95);
 }
 
 .log-drawer-list {
+  position: relative;
+  z-index: 1;
   flex: 1;
   overflow: auto;
   display: grid;
-  gap: 8px;
+  gap: 6px;
   padding: 12px;
+  background: rgba(8, 12, 19, 0.5);
 }
 
 .log-item {
   display: grid;
-  grid-template-columns: 84px 1fr;
+  grid-template-columns: 76px 64px 1fr;
   align-items: start;
-  gap: 8px;
-  font-size: 0.88rem;
+  column-gap: 8px;
+  row-gap: 2px;
+  font-size: 0.8rem;
+  border: 1px solid #1f2b3b;
+  border-left: 3px solid #355170;
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgba(10, 15, 24, 0.92);
 }
 
 .log-time {
-  color: #6b8592;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  color: #7f95ad;
+  letter-spacing: 0.1px;
+}
+
+.log-type {
+  color: #8eb8e8;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.log-scope {
+  grid-column: 3;
+  color: #76d9b3;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 .log-message {
-  color: #2b4654;
-  line-height: 1.45;
+  grid-column: 3;
+  color: #d7e2f0;
+  line-height: 1.42;
   word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.log-item.is-error {
+  border-left-color: #c55c63;
+}
+
+.log-item.is-error .log-type,
+.log-item.is-error .log-message {
+  color: #ff9fa4;
+}
+
+.log-item.is-warn {
+  border-left-color: #b98736;
+}
+
+.log-item.is-warn .log-type,
+.log-item.is-warn .log-message {
+  color: #ffd189;
+}
+
+.log-item.is-success {
+  border-left-color: #3ba565;
+}
+
+.log-item.is-success .log-type,
+.log-item.is-success .log-message {
+  color: #a4efb8;
+}
+
+.log-drawer .hint-text {
+  color: #8ea3ba;
+}
+
+.log-drawer-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.log-drawer-list::-webkit-scrollbar-track {
+  background: rgba(9, 14, 22, 0.95);
+}
+
+.log-drawer-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #2d415a;
+  border: 2px solid rgba(9, 14, 22, 0.95);
 }
 
 .preview-pane {
@@ -311,6 +427,11 @@ select {
   overflow: auto;
   padding: 20px;
   scroll-behavior: smooth;
+}
+
+.preview-pane-inline {
+  margin-top: 12px;
+  max-height: 46vh;
 }
 
 .preview-pane h1,
@@ -394,5 +515,10 @@ select {
   .log-toggle-btn {
     right: 12px;
     bottom: 12px;
+  }
+
+  .log-item {
+    grid-template-columns: 68px 56px 1fr;
+    font-size: 0.76rem;
   }
 }

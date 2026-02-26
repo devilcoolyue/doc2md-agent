@@ -26,6 +26,11 @@ export async function getTask(taskId) {
   return data;
 }
 
+export async function stopTask(taskId) {
+  const { data } = await http.post(`/api/tasks/${taskId}/stop`);
+  return data;
+}
+
 export async function getPreview(taskId) {
   const { data } = await http.get(`/api/tasks/${taskId}/preview`);
   return data;

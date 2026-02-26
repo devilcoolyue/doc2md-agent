@@ -74,8 +74,18 @@ conversion:
   strict_mode: true
   # 分片转换失败的最大重试次数（总尝试次数 = 1 + 该值）
   max_chunk_retries: 2
+  # 分片在重试耗尽后是否启用兜底（回退原文分片并继续）
+  allow_partial_on_chunk_failure: true
+  # 最终严格校验失败时是否降级放行并继续产出
+  allow_partial_on_validation_failure: true
   # 校验报错时最多展示多少个样例
   max_validation_report_items: 8
+  # 主体内容 token 覆盖率下限（用于防止模型删减原文）
+  min_content_token_coverage: 0.82
+  # 主体内容有效字符比例下限（用于防止模型输出过短）
+  min_content_char_ratio: 0.62
+  # 触发主体内容保真校验前，源片段最少 token 数
+  content_guard_min_tokens: 20
   # JSON 代码块高亮
   highlight_json: true
   # 图片输出文件夹名

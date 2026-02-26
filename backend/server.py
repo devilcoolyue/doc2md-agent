@@ -17,13 +17,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.agent import Doc2MDAgent
+from backend.agent import Doc2MDAgent, TaskStoppedError
 from backend.config_loader import load_config
 
 OUTPUT_ROOT = Path("output/tasks")
 FRONTEND_DIST = Path("frontend/dist")
 ALLOWED_SUFFIXES = {".docx", ".doc"}
-MAX_TASK_EVENTS = 400
+MAX_TASK_EVENTS = 2000
 
 
 def _utc_now() -> str:
@@ -48,9 +48,11 @@ class TaskInfo:
     usage: dict[str, Any] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
     output_file: str | None = None
+    partial_preview_file: str | None = None
     archive_file: str | None = None
     source_name: str | None = None
     error: str | None = None
+    stop_requested: bool = False
 
     def to_api_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -87,6 +89,39 @@ def _update_task(task_id: str, **kwargs: Any) -> None:
         task.updated_at = _utc_now()
 
 
+def _partial_preview_path(task_id: str, task: TaskInfo) -> Path:
+    if task.partial_preview_file:
+        return Path(task.partial_preview_file)
+    return OUTPUT_ROOT / task_id / "result" / ".partial_preview.md"
+
+
+def _resolve_preview_path(task_id: str, task: TaskInfo) -> Path | None:
+    candidates: list[Path] = []
+    if task.output_file:
+        candidates.append(Path(task.output_file))
+    candidates.append(_partial_preview_path(task_id, task))
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _resolve_output_root(task_id: str, task: TaskInfo) -> Path | None:
+    if task.output_file:
+        output_file = Path(task.output_file)
+        if output_file.exists():
+            return output_file.parent.resolve()
+
+    partial_preview = _partial_preview_path(task_id, task)
+    if partial_preview.exists():
+        return partial_preview.parent.resolve()
+
+    default_root = (OUTPUT_ROOT / task_id / "result").resolve()
+    if default_root.exists():
+        return default_root
+    return None
+
+
 def _append_task_event(task_id: str, event_type: str, message: str, **details: Any) -> None:
     with TASK_LOCK:
         task = TASKS.get(task_id)
@@ -106,6 +141,58 @@ def _append_task_event(task_id: str, event_type: str, message: str, **details: A
         if len(task.events) > MAX_TASK_EVENTS:
             task.events = task.events[-MAX_TASK_EVENTS:]
         task.updated_at = _utc_now()
+
+
+def _is_stop_requested(task_id: str) -> bool:
+    with TASK_LOCK:
+        task = TASKS.get(task_id)
+    return bool(task and task.stop_requested)
+
+
+def _build_task_archive(output_dir: Path) -> str:
+    return shutil.make_archive(
+        base_name=str(output_dir),
+        format="gztar",
+        root_dir=str(output_dir.parent),
+        base_dir=output_dir.name,
+    )
+
+
+def _ensure_partial_output_file(
+    task_id: str,
+    input_path: Path,
+    output_dir: Path,
+    agent: Doc2MDAgent | None = None,
+) -> str | None:
+    with TASK_LOCK:
+        task = TASKS.get(task_id)
+
+    if task and task.output_file and Path(task.output_file).exists():
+        return task.output_file
+
+    completed_output = output_dir / f"{input_path.stem}.md"
+    if completed_output.exists():
+        return str(completed_output)
+
+    preview_path = _partial_preview_path(task_id, task) if task else output_dir / ".partial_preview.md"
+    if not preview_path.exists():
+        return None
+
+    content = preview_path.read_text(encoding="utf-8")
+    if not content.strip():
+        return None
+
+    if agent is not None:
+        try:
+            content = agent.postprocess_partial_markdown(content)
+            preview_path.write_text(content, encoding="utf-8")
+            _append_task_event(task_id, "partial_postprocess", "已对停止任务的阶段性内容执行后处理")
+        except Exception as exc:
+            _append_task_event(task_id, "partial_postprocess_failed", f"partial 后处理失败，保留原始内容：{exc}")
+
+    partial_output = output_dir / f"{input_path.stem}.partial.md"
+    partial_output.write_text(content, encoding="utf-8")
+    return str(partial_output)
 
 
 def _progress_from_stage(stage: str, current: int, total: int, message: str | None = None) -> tuple[int, str]:
@@ -178,10 +265,14 @@ def _on_agent_event(task_id: str, payload: dict[str, Any]) -> None:
 
 
 def _run_task(task_id: str, input_path: Path, output_dir: Path, provider: str | None) -> None:
+    agent: Doc2MDAgent | None = None
     try:
         config = load_config(provider_override=provider)
         selected_provider = config.get("provider")
         selected_model = config.get("providers", {}).get(selected_provider, {}).get("model", "")
+        if _is_stop_requested(task_id):
+            raise TaskStoppedError("任务在启动前被停止")
+        partial_preview_path = output_dir / ".partial_preview.md"
         _update_task(
             task_id,
             status="running",
@@ -190,6 +281,7 @@ def _run_task(task_id: str, input_path: Path, output_dir: Path, provider: str | 
             message="任务启动",
             provider=selected_provider,
             model=selected_model,
+            partial_preview_file=str(partial_preview_path),
         )
         _append_task_event(
             task_id,
@@ -197,7 +289,11 @@ def _run_task(task_id: str, input_path: Path, output_dir: Path, provider: str | 
             f"任务启动：provider={selected_provider}, model={selected_model}",
         )
 
-        agent = Doc2MDAgent(config, event_callback=lambda payload: _on_agent_event(task_id, payload))
+        agent = Doc2MDAgent(
+            config,
+            event_callback=lambda payload: _on_agent_event(task_id, payload),
+            stop_checker=lambda: _is_stop_requested(task_id),
+        )
         output_file, usage = agent.convert(
             str(input_path),
             str(output_dir),
@@ -206,12 +302,7 @@ def _run_task(task_id: str, input_path: Path, output_dir: Path, provider: str | 
             ),
         )
 
-        archive_path = shutil.make_archive(
-            base_name=str(output_dir),
-            format="gztar",
-            root_dir=str(output_dir.parent),
-            base_dir=output_dir.name,
-        )
+        archive_path = _build_task_archive(output_dir)
         with TASK_LOCK:
             task_snapshot = TASKS.get(task_id)
             current_total = task_snapshot.llm_calls_total if task_snapshot else 0
@@ -225,6 +316,7 @@ def _run_task(task_id: str, input_path: Path, output_dir: Path, provider: str | 
             usage=usage,
             output_file=output_file,
             archive_file=archive_path,
+            stop_requested=False,
             llm_calls_total=max(
                 int(usage.get("llm_calls", 0)),
                 current_total,
@@ -240,6 +332,41 @@ def _run_task(task_id: str, input_path: Path, output_dir: Path, provider: str | 
             f"转换完成：输出文件 {Path(output_file).name}",
             archive_file=archive_path,
         )
+    except TaskStoppedError:
+        usage = agent.llm.get_usage_summary() if agent else {}
+        partial_output = _ensure_partial_output_file(task_id, input_path, output_dir, agent=agent)
+        archive_path = _build_task_archive(output_dir)
+        with TASK_LOCK:
+            task_snapshot = TASKS.get(task_id)
+            current_total = task_snapshot.llm_calls_total if task_snapshot else 0
+            current_finished = task_snapshot.llm_calls_finished if task_snapshot else 0
+        _update_task(
+            task_id,
+            status="stopped",
+            stage="stopped",
+            progress=100,
+            message="任务已停止，已打包已生成内容",
+            usage=usage,
+            output_file=partial_output,
+            archive_file=archive_path,
+            error=None,
+            stop_requested=False,
+            llm_calls_total=max(
+                int(usage.get("llm_calls", 0)),
+                current_total,
+            ),
+            llm_calls_finished=max(
+                int(usage.get("llm_calls", 0)),
+                current_finished,
+            ),
+        )
+        _append_task_event(
+            task_id,
+            "stopped",
+            "任务已停止，已打包当前已生成内容",
+            archive_file=archive_path,
+            output_file=partial_output,
+        )
     except Exception as exc:
         _update_task(
             task_id,
@@ -248,6 +375,7 @@ def _run_task(task_id: str, input_path: Path, output_dir: Path, provider: str | 
             progress=100,
             message="转换失败",
             error=str(exc),
+            stop_requested=False,
         )
         _append_task_event(task_id, "error", f"转换失败：{exc}")
 
@@ -276,6 +404,7 @@ async def create_conversion_task(
         task_id=task_id,
         status="queued",
         source_name=input_path.name,
+        partial_preview_file=str(output_dir / ".partial_preview.md"),
     )
     with TASK_LOCK:
         TASKS[task_id] = task
@@ -297,11 +426,44 @@ def get_task(task_id: str) -> dict[str, Any]:
     return task.to_api_dict()
 
 
+@app.post("/api/tasks/{task_id}/stop")
+def stop_task(task_id: str) -> dict[str, Any]:
+    task = _require_task(task_id)
+    if task.status == "stopped":
+        return {
+            "task_id": task_id,
+            "status": "stopped",
+            "message": "任务已停止",
+        }
+    if task.status in {"completed", "failed"}:
+        raise HTTPException(status_code=409, detail=f"任务状态为 {task.status}，无法停止")
+    if task.stop_requested:
+        return {
+            "task_id": task_id,
+            "status": "stopping",
+            "message": "已收到停止请求，正在结束任务",
+        }
+
+    _update_task(
+        task_id,
+        status="stopping",
+        stage="stopping",
+        message="正在停止任务并打包已生成内容",
+        stop_requested=True,
+    )
+    _append_task_event(task_id, "stop_requested", "用户请求停止任务，正在收尾并打包")
+    return {
+        "task_id": task_id,
+        "status": "stopping",
+        "message": "已收到停止请求，正在结束任务并打包已生成内容",
+    }
+
+
 @app.get("/api/tasks/{task_id}/download")
 def download_task(task_id: str) -> FileResponse:
     task = _require_task(task_id)
-    if task.status != "completed" or not task.archive_file:
-        raise HTTPException(status_code=409, detail="任务尚未完成，无法下载")
+    if task.status not in {"completed", "stopped"} or not task.archive_file:
+        raise HTTPException(status_code=409, detail="任务尚未完成或停止，无法下载")
 
     archive_path = Path(task.archive_file)
     if not archive_path.exists():
@@ -314,27 +476,32 @@ def download_task(task_id: str) -> FileResponse:
 @app.get("/api/tasks/{task_id}/preview")
 def preview_markdown(task_id: str) -> dict[str, Any]:
     task = _require_task(task_id)
-    if task.status != "completed" or not task.output_file:
-        raise HTTPException(status_code=409, detail="任务尚未完成，无法预览")
+    preview_path = _resolve_preview_path(task_id, task)
+    if not preview_path:
+        raise HTTPException(status_code=409, detail="任务尚未生成可预览内容")
 
-    output_path = Path(task.output_file)
-    if not output_path.exists():
-        raise HTTPException(status_code=404, detail="Markdown 文件不存在")
+    completed_output = Path(task.output_file).resolve() if task.output_file else None
+    is_completed_preview = (
+        task.status == "completed"
+        and completed_output is not None
+        and completed_output == preview_path.resolve()
+    )
 
     return {
-        "content": output_path.read_text(encoding="utf-8"),
+        "content": preview_path.read_text(encoding="utf-8"),
         "usage": task.usage,
         "asset_base_url": f"/api/tasks/{task_id}/assets",
+        "partial": not is_completed_preview,
+        "status": task.status,
     }
 
 
 @app.get("/api/tasks/{task_id}/assets/{asset_path:path}")
 def preview_asset(task_id: str, asset_path: str) -> FileResponse:
     task = _require_task(task_id)
-    if task.status != "completed" or not task.output_file:
-        raise HTTPException(status_code=409, detail="任务尚未完成，无法访问资源")
-
-    output_root = Path(task.output_file).parent.resolve()
+    output_root = _resolve_output_root(task_id, task)
+    if not output_root:
+        raise HTTPException(status_code=409, detail="任务尚未生成可访问的资源目录")
     target = (output_root / asset_path).resolve()
 
     if output_root not in target.parents and target != output_root:

@@ -26,13 +26,33 @@
       最后更新: {{ formatTime(task.updated_at) }}
     </p>
     <p class="hint-text" style="margin-top:10px;">日志已改为右侧弹窗展示，可随时查看最新进度。</p>
+    <p class="hint-text" style="margin-top:10px;" v-if="!previewHtml">已生成的内容会实时显示在下方预览区。</p>
+
+    <p class="hint-text" style="margin-top:14px;" v-if="previewHtml">
+      {{ previewPartial ? "已生成内容预览（实时）" : "Markdown 预览" }}
+    </p>
+    <div
+      v-if="previewHtml"
+      class="preview-pane preview-pane-inline"
+      v-html="previewHtml"
+    ></div>
 
     <p class="state-note error" v-if="task.status === 'failed'">
       {{ task.error || "转换失败，请重试。" }}
     </p>
 
-    <div class="toolbar" style="margin-top:16px;" v-if="task.status === 'failed'">
-      <button class="btn btn-ghost" @click="$emit('reset')">返回重新上传</button>
+    <div class="toolbar" style="margin-top:16px;" v-if="showToolbar">
+      <button
+        v-if="canStop || task.status === 'stopping'"
+        class="btn btn-danger"
+        :disabled="!canStop"
+        @click="$emit('stop')"
+      >
+        {{ stopButtonText }}
+      </button>
+      <button class="btn btn-ghost" v-if="task.status === 'failed'" @click="$emit('reset')">
+        返回重新上传
+      </button>
     </div>
   </section>
 </template>
@@ -44,16 +64,43 @@ const props = defineProps({
   task: {
     type: Object,
     required: true
+  },
+  previewHtml: {
+    type: String,
+    default: ""
+  },
+  previewPartial: {
+    type: Boolean,
+    default: true
+  },
+  stopping: {
+    type: Boolean,
+    default: false
   }
 });
 
-defineEmits(["reset"]);
+defineEmits(["reset", "stop"]);
 
 const stageText = computed(() => {
   if (props.task.message) {
     return props.task.message;
   }
   return "正在等待状态更新...";
+});
+
+const canStop = computed(() => {
+  return (props.task.status === "queued" || props.task.status === "running") && !props.stopping;
+});
+
+const showToolbar = computed(() => {
+  return canStop.value || props.task.status === "stopping" || props.task.status === "failed";
+});
+
+const stopButtonText = computed(() => {
+  if (props.task.status === "stopping" || props.stopping) {
+    return "停止中...";
+  }
+  return "停止任务";
 });
 
 function formatTime(value) {

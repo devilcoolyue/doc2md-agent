@@ -108,6 +108,8 @@ python server.py
 - `chunk_strategy`: `section`（推荐，按章节优先）或 `size`
 - `strict_mode`: 开启后会校验“标题不增不减”“错误码不扩写”
 - `max_chunk_retries`: 单个分片校验失败时自动重试次数
+- `allow_partial_on_chunk_failure`: 分片重试耗尽后回退原文分片并继续，避免整单失败
+- `allow_partial_on_validation_failure`: 最终严格校验失败时降级放行并输出结果（会记录告警）
 - `deterministic_toc`: 开启后使用非 AI 目录生成，结构更稳定
 
 ## 部署（systemd）

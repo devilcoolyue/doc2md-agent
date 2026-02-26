@@ -24,6 +24,10 @@
     <ConversionProgress
       v-else-if="view === 'processing'"
       :task="task"
+      :stopping="stopping"
+      :preview-html="markdownHtml"
+      :preview-partial="previewPartial"
+      @stop="requestStopTask"
       @reset="resetAll"
     />
 
@@ -31,6 +35,7 @@
       v-else
       :markdown-html="markdownHtml"
       :usage="usage"
+      :task-status="task.status"
       :download-url="downloadUrl"
       @reset="resetAll"
     />
@@ -54,7 +59,8 @@ import {
   getDownloadUrl,
   getPreview,
   getProviders,
-  getTask
+  getTask,
+  stopTask as stopTaskApi
 } from "./api";
 import FileUpload from "./components/FileUpload.vue";
 import ConversionProgress from "./components/ConversionProgress.vue";
@@ -67,7 +73,9 @@ const task = ref({});
 const taskId = ref("");
 const usage = ref({});
 const markdownHtml = ref("");
+const previewPartial = ref(true);
 const submitting = ref(false);
+const stopping = ref(false);
 const requestError = ref("");
 const logDrawerOpen = ref(false);
 let poller = null;
@@ -76,7 +84,7 @@ const view = computed(() => {
   if (!taskId.value) {
     return "upload";
   }
-  if (task.value.status === "completed") {
+  if (task.value.status === "completed" || task.value.status === "stopped") {
     return "done";
   }
   return "processing";
@@ -112,6 +120,10 @@ async function startTask({ file, provider }) {
       progress: 0,
       message: "任务已创建"
     };
+    usage.value = {};
+    markdownHtml.value = "";
+    previewPartial.value = true;
+    stopping.value = false;
     logDrawerOpen.value = true;
     startPolling();
   } catch (error) {
@@ -133,6 +145,39 @@ function startPolling() {
   stopPolling();
   pollTask();
   poller = setInterval(pollTask, 1200);
+}
+
+async function requestStopTask() {
+  if (!taskId.value) {
+    return;
+  }
+  if (task.value.status === "completed" || task.value.status === "failed" || task.value.status === "stopped") {
+    return;
+  }
+  if (stopping.value || task.value.status === "stopping") {
+    return;
+  }
+
+  const confirmed = window.confirm("确认停止当前任务吗？确认后会打包当前已生成的 Markdown 内容。");
+  if (!confirmed) {
+    return;
+  }
+
+  requestError.value = "";
+  stopping.value = true;
+  try {
+    const data = await stopTaskApi(taskId.value);
+    task.value = {
+      ...task.value,
+      status: data.status || "stopping",
+      message: data.message || "已收到停止请求，正在结束任务"
+    };
+    await pollTask();
+  } catch (error) {
+    requestError.value = `停止任务失败: ${error.message}`;
+  } finally {
+    stopping.value = false;
+  }
 }
 
 function stripHtml(text) {
@@ -203,6 +248,27 @@ function renderMarkdown(content, assetBaseUrl) {
   return marked.parse(content || "", { renderer });
 }
 
+async function refreshPreview(taskData) {
+  if (!taskId.value) {
+    return;
+  }
+  try {
+    const preview = await getPreview(taskId.value);
+    usage.value = preview.usage || taskData.usage || usage.value || {};
+    markdownHtml.value = renderMarkdown(
+      preview.content || "",
+      preview.asset_base_url || `/api/tasks/${taskId.value}/assets`
+    );
+    previewPartial.value = Boolean(preview.partial);
+  } catch (error) {
+    const statusCode = Number(error?.response?.status || 0);
+    if (statusCode === 404 || statusCode === 409) {
+      return;
+    }
+    requestError.value = `预览刷新失败: ${error.message}`;
+  }
+}
+
 async function pollTask() {
   if (!taskId.value) {
     return;
@@ -212,14 +278,18 @@ async function pollTask() {
     const taskData = await getTask(taskId.value);
     task.value = taskData;
 
-    if (taskData.status === "completed") {
+    if (
+      taskData.status === "running" ||
+      taskData.status === "stopping" ||
+      taskData.status === "failed" ||
+      taskData.status === "completed" ||
+      taskData.status === "stopped"
+    ) {
+      await refreshPreview(taskData);
+    }
+
+    if (taskData.status === "completed" || taskData.status === "stopped") {
       stopPolling();
-      const preview = await getPreview(taskId.value);
-      usage.value = preview.usage || taskData.usage || {};
-      markdownHtml.value = renderMarkdown(
-        preview.content || "",
-        preview.asset_base_url || `/api/tasks/${taskId.value}/assets`
-      );
     }
 
     if (taskData.status === "failed") {
@@ -234,10 +304,12 @@ async function pollTask() {
 function resetAll(clearError = true) {
   stopPolling();
   logDrawerOpen.value = false;
+  stopping.value = false;
   taskId.value = "";
   task.value = {};
   usage.value = {};
   markdownHtml.value = "";
+  previewPartial.value = true;
   if (clearError) {
     requestError.value = "";
   }

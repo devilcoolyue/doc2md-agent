@@ -47,6 +47,11 @@ def load_config(config_path: str = None, provider_override: str = None) -> dict:
                 "deterministic_toc": True,
                 "strict_mode": True,
                 "max_chunk_retries": 2,
+                "allow_partial_on_chunk_failure": True,
+                "allow_partial_on_validation_failure": True,
+                "min_content_token_coverage": 0.82,
+                "min_content_char_ratio": 0.62,
+                "content_guard_min_tokens": 20,
                 "image_dir": "images",
             },
         }

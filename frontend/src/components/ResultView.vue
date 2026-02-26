@@ -1,9 +1,9 @@
 <template>
   <section class="workspace-card">
-    <h2 class="panel-title">转换完成</h2>
+    <h2 class="panel-title">{{ isStopped ? "任务已停止" : "转换完成" }}</h2>
 
     <div class="chip-row">
-      <span class="chip accent">结果已生成</span>
+      <span class="chip accent">{{ isStopped ? "已打包部分结果" : "结果已生成" }}</span>
       <span class="chip" v-if="usage.prompt_tokens !== undefined">
         输入 Tokens: {{ usage.prompt_tokens }}
       </span>
@@ -18,13 +18,16 @@
     <p class="hint-text" style="margin-top:12px;" v-if="costFormula">
       费用计算：{{ costFormula }}
     </p>
+    <p class="hint-text" style="margin-top:10px;" v-if="isStopped">
+      该任务由用户停止，下载包中包含停止前已生成的 Markdown 与资源文件。
+    </p>
 
     <div class="toolbar" style="margin-top:16px;">
       <a class="btn btn-primary" :href="downloadUrl">下载压缩包</a>
       <button class="btn btn-ghost" @click="$emit('reset')">转换新文档</button>
     </div>
 
-    <p class="hint-text" style="margin-top:14px;">Markdown 预览</p>
+    <p class="hint-text" style="margin-top:14px;">{{ isStopped ? "已生成内容预览（部分）" : "Markdown 预览" }}</p>
     <div ref="previewPane" class="preview-pane" v-html="markdownHtml" @click="onPreviewClick"></div>
   </section>
 </template>
@@ -41,6 +44,10 @@ const props = defineProps({
     type: Object,
     default: () => ({})
   },
+  taskStatus: {
+    type: String,
+    default: "completed"
+  },
   downloadUrl: {
     type: String,
     required: true
@@ -50,6 +57,7 @@ const props = defineProps({
 defineEmits(["reset"]);
 
 const previewPane = ref(null);
+const isStopped = computed(() => props.taskStatus === "stopped");
 
 const costFormula = computed(() => {
   const promptTokens = Number(props.usage.prompt_tokens || 0);

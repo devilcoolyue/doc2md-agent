@@ -18,18 +18,21 @@
     <header class="log-drawer-header">
       <div>
         <h3 class="log-drawer-title">任务日志</h3>
-        <p class="hint-text">状态: {{ task.status || "--" }} · 共 {{ events.length }} 条</p>
+        <p class="hint-text log-status">状态: {{ task.status || "--" }} · 共 {{ events.length }} 条</p>
       </div>
-      <button class="btn btn-ghost" type="button" @click="$emit('close')">关闭</button>
+      <button class="log-close-btn" type="button" @click="$emit('close')">关闭</button>
     </header>
 
     <div ref="logListRef" class="log-drawer-list" v-if="displayedEvents.length">
       <div
         class="log-item"
+        :class="eventRowClass(event)"
         v-for="(event, index) in displayedEvents"
         :key="`${event.timestamp || index}-${index}`"
       >
         <span class="log-time">{{ formatTime(event.timestamp) }}</span>
+        <span class="log-type">{{ formatType(event.type) }}</span>
+        <span class="log-scope" v-if="formatScope(event)">{{ formatScope(event) }}</span>
         <span class="log-message">{{ event.message }}</span>
       </div>
     </div>
@@ -64,7 +67,7 @@ defineEmits(["toggle", "close"]);
 const logListRef = ref(null);
 
 const displayedEvents = computed(() => {
-  return props.events.slice(-200);
+  return props.events.slice(-800);
 });
 
 function scrollToLatest() {
@@ -119,5 +122,66 @@ function formatTime(value) {
   return date.toLocaleTimeString("zh-CN", {
     hour12: false
   });
+}
+
+function formatType(type) {
+  const value = String(type || "info");
+  if (value.startsWith("llm_call_")) {
+    return "LLM";
+  }
+  if (value.startsWith("chunk_")) {
+    return "CHUNK";
+  }
+  if (value.startsWith("json_")) {
+    return "JSON";
+  }
+  if (value.includes("error") || value.endsWith("failed")) {
+    return "ERROR";
+  }
+  if (value.includes("warning") || value.endsWith("fallback")) {
+    return "WARN";
+  }
+  if (value.startsWith("pipeline_")) {
+    return "PIPE";
+  }
+  if (value.startsWith("preprocess_")) {
+    return "PRE";
+  }
+  if (value.startsWith("analyze_")) {
+    return "ANL";
+  }
+  if (value.startsWith("postprocess_")) {
+    return "POST";
+  }
+  return "INFO";
+}
+
+function formatScope(event) {
+  const section = event.section_label || event.section_heading || event.section_id || "";
+  const chunkText =
+    event.chunk_index && event.total_chunks
+      ? `片段 ${event.chunk_index}/${event.total_chunks}`
+      : "";
+  if (chunkText && section) {
+    return `${chunkText} · ${section}`;
+  }
+  if (chunkText) {
+    return chunkText;
+  }
+  return section;
+}
+
+function eventRowClass(event) {
+  const type = String(event.type || "");
+  if (type === "error" || type.endsWith("failed") || type.includes("error")) {
+    return "is-error";
+  }
+  if (type === "chunk_validation_failed" || type.endsWith("fallback")) {
+    return "is-warn";
+  }
+  if (type === "chunk_validation_passed" || type === "pipeline_completed") {
+    return "is-success";
+  }
+  return "is-info";
 }
 </script>
